@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Room Management</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f7fb;color:#172033}
+.container{max-width:1100px;margin:auto;padding:20px}
+h1{margin:0 0 6px}.sub{color:#667085;margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:15px}
+.card{background:#fff;border-radius:16px;padding:18px;box-shadow:0 4px 18px #00000010;margin-bottom:16px}
+.stat{font-size:28px;font-weight:700;margin-top:8px}
+label{display:block;font-size:13px;font-weight:700;margin:10px 0 5px}
+input,select,button{width:100%;padding:11px;border:1px solid #d7dce5;border-radius:10px;font-size:15px}
+button{cursor:pointer;background:#172033;color:#fff;border:0;font-weight:700}
+button.secondary{background:#e9eef6;color:#172033}button.danger{background:#c62828}
+button.small{width:auto;padding:7px 10px;font-size:13px;margin:2px}
+table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:9px;border-bottom:1px solid #edf0f4;text-align:left;font-size:14px}
+.notice{padding:12px;border-radius:10px;background:#fff3cd;color:#6b5200;margin-bottom:15px}
+.success{background:#e8f7ee;color:#176b3a}.error{background:#fdecec;color:#a51d2d}
+.actions{white-space:nowrap}.members{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:600px){.members{grid-template-columns:1fr}table{font-size:12px}th,td{padding:7px}.container{padding:12px}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🏠 Room Management</h1>
+  <div class="sub">Shared market & meal tracker — Tawhid • Monir • Mostofa</div>
+
+  <div id="status" class="notice">Connecting to Supabase…</div>
+
+  <div class="grid">
+    <div class="card"><div>Total Market</div><div id="totalMarket" class="stat">৳0.00</div></div>
+    <div class="card"><div>Total Meals</div><div id="totalMeals" class="stat">0</div></div>
+    <div class="card"><div>Current Meal Rate</div><div id="mealRate" class="stat">৳0.00</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Add Market Expense</h2>
+    <div class="grid">
+      <div><label>Date</label><input id="expenseDate" type="date"></div>
+      <div><label>Paid By</label><select id="expensePerson"><option>Tawhid</option><option>Monir</option><option>Mostofa</option></select></div>
+      <div><label>Description</label><input id="expenseDescription" placeholder="e.g. Rice, vegetables"></div>
+      <div><label>Amount (BDT)</label><input id="expenseAmount" type="number" min="0" step="0.01"></div>
+    </div>
+    <button onclick="addExpense()">Add Expense</button>
+  </div>
+
+  <div class="card">
+    <h2>Add / Update Meals</h2>
+    <label>Date</label><input id="mealDate" type="date">
+    <div class="members">
+      <div><label>Tawhid</label><input id="mealTawhid" type="number" min="0" step="0.5" value="0"></div>
+      <div><label>Monir</label><input id="mealMonir" type="number" min="0" step="0.5" value="0"></div>
+      <div><label>Mostofa</label><input id="mealMostofa" type="number" min="0" step="0.5" value="0"></div>
+    </div>
+    <br><button onclick="saveMeals()">Save Meals</button>
+  </div>
+
+  <div class="card">
+    <h2>Member Totals</h2>
+    <div class="grid">
+      <div><b>Tawhid</b><div id="tawhidTotal" class="stat">0</div></div>
+      <div><b>Monir</b><div id="monirTotal" class="stat">0</div></div>
+      <div><b>Mostofa</b><div id="mostofaTotal" class="stat">0</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Market Expenses</h2>
+    <div style="overflow:auto">
+      <table><thead><tr><th>Date</th><th>Paid By</th><th>Description</th><th>Amount</th><th>Action</th></tr></thead>
+      <tbody id="expenseRows"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Meal Entries</h2>
+    <div style="overflow:auto">
+      <table><thead><tr><th>Date</th><th>Tawhid</th><th>Monir</th><th>Mostofa</th><th>Total</th><th>Action</th></tr></thead>
+      <tbody id="mealRows"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://vqzcdxurhqhjwyevpbgh.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_BI4GiBv56vDYSMG4rcwlPg_Q4P9L3pV";
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+const today = new Date().toISOString().slice(0,10);
+document.getElementById("expenseDate").value = today;
+document.getElementById("mealDate").value = today;
+
+function money(n){return "৳"+Number(n||0).toFixed(2)}
+function msg(text, type="notice"){
+  const el=document.getElementById("status");
+  el.textContent=text; el.className="notice "+(type==="success"?"success":type==="error"?"error":"");
+}
+function validKey(){
+  return SUPABASE_PUBLISHABLE_KEY !== "PASTE_YOUR_PUBLISHABLE_KEY_HERE";
+}
+
+async function loadAll(){
+  if(!validKey()){msg("First paste your Supabase Publishable Key into the HTML file, then open it again.","error");return;}
+  const [e,m]=await Promise.all([
+    db.from("expenses").select("*").order("expense_date",{ascending:false}).order("id",{ascending:false}),
+    db.from("meals").select("*").order("meal_date",{ascending:false}).order("id",{ascending:false})
+  ]);
+  if(e.error){msg("Expenses error: "+e.error.message,"error");return;}
+  if(m.error){msg("Meals error: "+m.error.message,"error");return;}
+  render(e.data||[],m.data||[]);
+  msg("Connected — shared data is loading from Supabase.","success");
+}
+
+function render(expenses, meals){
+  const totalMarket=expenses.reduce((s,x)=>s+Number(x.amount||0),0);
+  const tawhid=meals.reduce((s,x)=>s+Number(x.tawhid||0),0);
+  const monir=meals.reduce((s,x)=>s+Number(x.monir||0),0);
+  const mostofa=meals.reduce((s,x)=>s+Number(x.mostofa||0),0);
+  const totalMeals=tawhid+monir+mostofa;
+  const rate=totalMeals?totalMarket/totalMeals:0;
+
+  totalMarketEl.textContent=money(totalMarket);
+  totalMealsEl.textContent=totalMeals.toFixed(1).replace(".0","");
+  mealRateEl.textContent=money(rate);
+  tawhidTotalEl.textContent=tawhid.toFixed(1).replace(".0","");
+  monirTotalEl.textContent=monir.toFixed(1).replace(".0","");
+  mostofaTotalEl.textContent=mostofa.toFixed(1).replace(".0","");
+
+  expenseRows.innerHTML=expenses.map(x=>`<tr>
+    <td>${x.expense_date}</td><td>${esc(x.person)}</td><td>${esc(x.description)}</td><td>${money(x.amount)}</td>
+    <td class="actions"><button class="small" onclick='editExpense(${JSON.stringify(x)})'>Edit</button><button class="small danger" onclick="deleteExpense(${x.id})">Delete</button></td>
+  </tr>`).join("") || `<tr><td colspan="5">No expenses yet.</td></tr>`;
+
+  mealRows.innerHTML=meals.map(x=>`<tr>
+    <td>${x.meal_date}</td><td>${x.tawhid}</td><td>${x.monir}</td><td>${x.mostofa}</td>
+    <td>${(Number(x.tawhid)+Number(x.monir)+Number(x.mostofa)).toFixed(1).replace(".0","")}</td>
+    <td class="actions"><button class="small" onclick='editMeal(${JSON.stringify(x)})'>Edit</button><button class="small danger" onclick="deleteMeal(${x.id})">Delete</button></td>
+  </tr>`).join("") || `<tr><td colspan="6">No meal entries yet.</td></tr>`;
+}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+
+async function addExpense(){
+  const row={expense_date:expenseDate.value,person:expensePerson.value,description:expenseDescription.value.trim(),amount:Number(expenseAmount.value)};
+  if(!row.expense_date||!row.description||!row.amount){alert("Please fill all expense fields.");return;}
+  const {error}=await db.from("expenses").insert(row);
+  if(error){msg(error.message,"error");return;}
+  expenseDescription.value=""; expenseAmount.value=""; await loadAll();
+}
+async function deleteExpense(id){
+  if(!confirm("Delete this expense?"))return;
+  const {error}=await db.from("expenses").delete().eq("id",id);
+  if(error)msg(error.message,"error"); else loadAll();
+}
+async function editExpense(x){
+  const d=prompt("Description:",x.description); if(d===null)return;
+  const a=prompt("Amount:",x.amount); if(a===null)return;
+  const date=prompt("Date (YYYY-MM-DD):",x.expense_date); if(date===null)return;
+  const p=prompt("Paid by (Tawhid/Monir/Mostofa):",x.person); if(p===null)return;
+  const {error}=await db.from("expenses").update({description:d,amount:Number(a),expense_date:date,person:p}).eq("id",x.id);
+  if(error)msg(error.message,"error"); else loadAll();
+}
+
+async function saveMeals(){
+  const date=mealDate.value;
+  const vals={meal_date:date,tawhid:Number(mealTawhid.value)||0,monir:Number(mealMonir.value)||0,mostofa:Number(mealMostofa.value)||0};
+  if(!date){alert("Select a date.");return;}
+  // One row per date: update existing date, otherwise insert.
+  const existing=await db.from("meals").select("id").eq("meal_date",date).maybeSingle();
+  if(existing.error){msg(existing.error.message,"error");return;}
+  let result;
+  if(existing.data) result=await db.from("meals").update(vals).eq("id",existing.data.id);
+  else result=await db.from("meals").insert(vals);
+  if(result.error){msg(result.error.message,"error");return;}
+  await loadAll();
+}
+function editMeal(x){
+  mealDate.value=x.meal_date; mealTawhid.value=x.tawhid; mealMonir.value=x.monir; mealMostofa.value=x.mostofa;
+  window.scrollTo({top:document.querySelector("#mealDate").getBoundingClientRect().top+window.scrollY-80,behavior:"smooth"});
+}
+async function deleteMeal(id){
+  if(!confirm("Delete this meal entry?"))return;
+  const {error}=await db.from("meals").delete().eq("id",id);
+  if(error)msg(error.message,"error"); else loadAll();
+}
+
+const totalMarketEl=document.getElementById("totalMarket");
+const totalMealsEl=document.getElementById("totalMeals");
+const mealRateEl=document.getElementById("mealRate");
+const tawhidTotalEl=document.getElementById("tawhidTotal");
+const monirTotalEl=document.getElementById("monirTotal");
+const mostofaTotalEl=document.getElementById("mostofaTotal");
+const expenseRows=document.getElementById("expenseRows");
+const mealRows=document.getElementById("mealRows");
+
+loadAll();
+</script>
+</body>
+</html>
